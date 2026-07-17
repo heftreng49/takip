@@ -91,20 +91,23 @@ class MainViewModel : ViewModel() {
         val inputStream = context.contentResolver.openInputStream(uri)
             ?: throw ParseException("ZIP dosyası açılamadı")
 
-        var followersJson: String? = null
+        // Tüm followers dosyalarını topla (followers_1.json, followers_2.json ...)
+        val followersJsonList = mutableListOf<String>()
         var followingJson: String? = null
 
         ZipInputStream(inputStream.buffered()).use { zip ->
             var entry = zip.nextEntry
             while (entry != null) {
                 val name = entry.name.lowercase()
+                val fileName = name.substringAfterLast("/")
                 when {
-                    // followers_1.json, followers_2.json etc. inside connections/followers_and_following/
-                    name.contains("followers") && name.endsWith(".json") && followersJson == null -> {
-                        followersJson = zip.readBytes().toString(Charsets.UTF_8)
-                    }
-                    name.contains("following") && name.endsWith(".json") && followingJson == null -> {
+                    // Sadece following.json — klasör adındaki "following" ile karışmasın
+                    fileName == "following.json" && followingJson == null -> {
                         followingJson = zip.readBytes().toString(Charsets.UTF_8)
+                    }
+                    // followers_1.json, followers_2.json vb. — "following" içermemeli
+                    fileName.startsWith("followers") && fileName.endsWith(".json") && !fileName.contains("following") -> {
+                        followersJsonList.add(zip.readBytes().toString(Charsets.UTF_8))
                     }
                 }
                 zip.closeEntry()
@@ -112,17 +115,26 @@ class MainViewModel : ViewModel() {
             }
         }
 
-        val followers = followersJson?.let { InstagramDataParser.parseFollowers(it) }
-            ?: throw ParseException(
+        if (followersJsonList.isEmpty()) {
+            throw ParseException(
                 "ZIP içinde followers_1.json bulunamadı.\n" +
                 "Lütfen Instagram'dan indirdiğiniz ZIP dosyasını yükleyin."
             )
+        }
 
-        val following = followingJson?.let { InstagramDataParser.parseFollowing(it) }
-            ?: throw ParseException(
+        if (followingJson == null) {
+            throw ParseException(
                 "ZIP içinde following.json bulunamadı.\n" +
                 "Lütfen Instagram'dan indirdiğiniz ZIP dosyasını yükleyin."
             )
+        }
+
+        // Birden fazla followers dosyasını birleştir
+        val followers = followersJsonList.flatMap {
+            InstagramDataParser.parseFollowers(it)
+        }.distinctBy { it.username }
+
+        val following = InstagramDataParser.parseFollowing(followingJson!!)
 
         return buildResult(following, followers)
     }

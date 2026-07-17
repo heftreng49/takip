@@ -16,7 +16,6 @@ object InstagramDataParser {
     fun parseFollowers(json: String): List<InstagramUser> {
         return try {
             val root = JsonParser.parseString(json)
-            // followers_1.json is a JSON array at the root
             if (root.isJsonArray) {
                 parseUserArray(root.asJsonArray)
             } else {
@@ -31,14 +30,12 @@ object InstagramDataParser {
         return try {
             val root = JsonParser.parseString(json)
             when {
-                // following.json: {"relationships_following": [...]}
                 root.isJsonObject -> {
                     val obj = root.asJsonObject
                     val key = obj.keySet().firstOrNull()
                         ?: throw ParseException("Following JSON dosyası boş veya geçersiz")
                     parseUserArray(obj.getAsJsonArray(key))
                 }
-                // Also support raw array format
                 root.isJsonArray -> parseUserArray(root.asJsonArray)
                 else -> throw ParseException("Tanımlanamayan following JSON formatı")
             }
@@ -82,10 +79,10 @@ object InstagramDataParser {
         val followerUsernames = followers.map { it.username }.toSet()
         val followingUsernames = following.map { it.username }.toSet()
 
-        // People you follow but don't follow you back
+        // Seni takip etmeyenler (sen takip ediyorsun ama onlar etmiyor)
         val unfollowers = following.filter { it.username !in followerUsernames }
 
-        // People who follow you but you don't follow back
+        // Senin takip etmediğin kişiler (onlar seni takip ediyor ama sen etmiyorsun)
         val notFollowingBack = followers.filter { it.username !in followingUsernames }
 
         return Pair(unfollowers, notFollowingBack)
