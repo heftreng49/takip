@@ -28,50 +28,32 @@ class MainViewModel : ViewModel() {
     private val _selectedTab = MutableStateFlow(0)
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
 
-    fun setSearchQuery(query: String) {
-        _searchQuery.value = query
-    }
-
-    fun setSelectedTab(tab: Int) {
-        _selectedTab.value = tab
-        _searchQuery.value = ""
-    }
+    fun setSearchQuery(query: String) { _searchQuery.value = query }
+    fun setSelectedTab(tab: Int) { _selectedTab.value = tab; _searchQuery.value = "" }
 
     fun processZipFile(context: Context, uri: Uri) {
         viewModelScope.launch {
             _analysisState.value = AnalysisState.Loading
             try {
-                val result = withContext(Dispatchers.IO) {
-                    parseZipFromUri(context, uri)
-                }
+                val result = withContext(Dispatchers.IO) { parseZipFromUri(context, uri) }
                 _analysisState.value = AnalysisState.Success(result)
             } catch (e: ParseException) {
                 _analysisState.value = AnalysisState.Error(e.message ?: "Bilinmeyen hata")
             } catch (e: Exception) {
-                _analysisState.value = AnalysisState.Error(
-                    "Dosya işlenemedi: ${e.message ?: "Bilinmeyen hata"}"
-                )
+                _analysisState.value = AnalysisState.Error("Dosya işlenemedi: ${e.message ?: "Bilinmeyen hata"}")
             }
         }
     }
 
-    fun processJsonFiles(
-        context: Context,
-        followersUri: Uri,
-        followingUri: Uri
-    ) {
+    fun processJsonFiles(context: Context, followersUri: Uri, followingUri: Uri) {
         viewModelScope.launch {
             _analysisState.value = AnalysisState.Loading
             try {
                 val result = withContext(Dispatchers.IO) {
                     val followersJson = context.contentResolver.openInputStream(followersUri)
-                        ?.bufferedReader()?.readText()
-                        ?: throw ParseException("Followers dosyası okunamadı")
-
+                        ?.bufferedReader()?.readText() ?: throw ParseException("Followers dosyası okunamadı")
                     val followingJson = context.contentResolver.openInputStream(followingUri)
-                        ?.bufferedReader()?.readText()
-                        ?: throw ParseException("Following dosyası okunamadı")
-
+                        ?.bufferedReader()?.readText() ?: throw ParseException("Following dosyası okunamadı")
                     val followers = InstagramDataParser.parseFollowers(followersJson)
                     val following = InstagramDataParser.parseFollowing(followingJson)
                     buildResult(following, followers)
@@ -80,9 +62,7 @@ class MainViewModel : ViewModel() {
             } catch (e: ParseException) {
                 _analysisState.value = AnalysisState.Error(e.message ?: "Bilinmeyen hata")
             } catch (e: Exception) {
-                _analysisState.value = AnalysisState.Error(
-                    "Dosya işlenemedi: ${e.message ?: "Bilinmeyen hata"}"
-                )
+                _analysisState.value = AnalysisState.Error("Dosya işlenemedi: ${e.message ?: "Bilinmeyen hata"}")
             }
         }
     }
@@ -91,21 +71,17 @@ class MainViewModel : ViewModel() {
         val inputStream = context.contentResolver.openInputStream(uri)
             ?: throw ParseException("ZIP dosyası açılamadı")
 
-        // Tüm followers dosyalarını topla (followers_1.json, followers_2.json ...)
         val followersJsonList = mutableListOf<String>()
         var followingJson: String? = null
 
         ZipInputStream(inputStream.buffered()).use { zip ->
             var entry = zip.nextEntry
             while (entry != null) {
-                val name = entry.name.lowercase()
-                val fileName = name.substringAfterLast("/")
+                val fileName = entry.name.substringAfterLast("/").lowercase()
                 when {
-                    // Sadece following.json — klasör adındaki "following" ile karışmasın
                     fileName == "following.json" && followingJson == null -> {
                         followingJson = zip.readBytes().toString(Charsets.UTF_8)
                     }
-                    // followers_1.json, followers_2.json vb. — "following" içermemeli
                     fileName.startsWith("followers") && fileName.endsWith(".json") && !fileName.contains("following") -> {
                         followersJsonList.add(zip.readBytes().toString(Charsets.UTF_8))
                     }
@@ -115,52 +91,30 @@ class MainViewModel : ViewModel() {
             }
         }
 
-        if (followersJsonList.isEmpty()) {
-            throw ParseException(
-                "ZIP içinde followers_1.json bulunamadı.\n" +
-                "Lütfen Instagram'dan indirdiğiniz ZIP dosyasını yükleyin."
-            )
-        }
+        if (followersJsonList.isEmpty()) throw ParseException(
+            "ZIP içinde followers_1.json bulunamadı.\nLütfen Instagram'dan indirdiğiniz ZIP dosyasını yükleyin."
+        )
+        if (followingJson == null) throw ParseException(
+            "ZIP içinde following.json bulunamadı.\nLütfen Instagram'dan indirdiğiniz ZIP dosyasını yükleyin."
+        )
 
-        if (followingJson == null) {
-            throw ParseException(
-                "ZIP içinde following.json bulunamadı.\n" +
-                "Lütfen Instagram'dan indirdiğiniz ZIP dosyasını yükleyin."
-            )
-        }
-
-        // Birden fazla followers dosyasını birleştir
         val followers = followersJsonList.flatMap {
             InstagramDataParser.parseFollowers(it)
         }.distinctBy { it.username }
 
         val following = InstagramDataParser.parseFollowing(followingJson!!)
-
         return buildResult(following, followers)
     }
 
-    private fun buildResult(
-        following: List<InstagramUser>,
-        followers: List<InstagramUser>
-    ): AnalysisResult {
+    private fun buildResult(following: List<InstagramUser>, followers: List<InstagramUser>): AnalysisResult {
         val (unfollowers, notFollowingBack) = InstagramDataParser.analyze(following, followers)
-        return AnalysisResult(
-            following = following,
-            followers = followers,
-            unfollowers = unfollowers,
-            notFollowingBack = notFollowingBack
-        )
+        return AnalysisResult(following = following, followers = followers, unfollowers = unfollowers, notFollowingBack = notFollowingBack)
     }
 
     fun filteredList(list: List<InstagramUser>): List<InstagramUser> {
         val q = _searchQuery.value.trim().lowercase()
-        return if (q.isEmpty()) list
-        else list.filter { it.username.lowercase().contains(q) }
+        return if (q.isEmpty()) list else list.filter { it.username.lowercase().contains(q) }
     }
 
-    fun reset() {
-        _analysisState.value = AnalysisState.Idle
-        _searchQuery.value = ""
-        _selectedTab.value = 0
-    }
+    fun reset() { _analysisState.value = AnalysisState.Idle; _searchQuery.value = ""; _selectedTab.value = 0 }
 }

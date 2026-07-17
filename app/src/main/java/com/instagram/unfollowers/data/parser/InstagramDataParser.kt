@@ -1,16 +1,10 @@
 package com.instagram.unfollowers.data.parser
 
 import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.instagram.unfollowers.data.model.InstagramUser
 
-/**
- * Parses Instagram data export JSON files.
- *
- * Instagram exports two types of files:
- * - followers_1.json   → array of {string_list_data: [{value, href, timestamp}]}
- * - following.json     → {relationships_following: [{string_list_data: [{value, href, timestamp}]}]}
- */
 object InstagramDataParser {
 
     fun parseFollowers(json: String): List<InstagramUser> {
@@ -52,11 +46,18 @@ object InstagramDataParser {
             try {
                 val obj = element.asJsonObject
                 val stringListData = obj.getAsJsonArray("string_list_data")
+
                 if (stringListData != null && stringListData.size() > 0) {
                     val data = stringListData[0].asJsonObject
-                    val username = data.get("value")?.asString ?: continue
-                    val href = data.get("href")?.asString ?: ""
                     val timestamp = data.get("timestamp")?.asLong ?: 0L
+                    val href = data.get("href")?.asString ?: ""
+
+                    // Kullanıcı adı: önce "value", yoksa "title" (following.json formatı)
+                    val username = data.get("value")?.asString?.takeIf { it.isNotBlank() }
+                        ?: obj.get("title")?.asString?.takeIf { it.isNotBlank() }
+                        ?: href.substringAfterLast("/").takeIf { it.isNotBlank() }
+                        ?: continue
+
                     users.add(
                         InstagramUser(
                             username = username,
