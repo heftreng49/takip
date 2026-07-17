@@ -36,8 +36,8 @@ import com.instagram.unfollowers.viewmodel.MainViewModel
 fun HomeScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
     var uploadMode by remember { mutableStateOf(UploadMode.ZIP) }
-    var followersUri by remember { mutableStateOf<Uri?>(null) }
-    var followingUri by remember { mutableStateOf<Uri?>(null) }
+    var followersUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var followingUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
 
     val zipLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -46,12 +46,12 @@ fun HomeScreen(viewModel: MainViewModel) {
     }
 
     val followersLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri -> followersUri = uri }
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris -> if (uris.isNotEmpty()) followersUris = followersUris + uris }
 
     val followingLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri -> followingUri = uri }
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris -> if (uris.isNotEmpty()) followingUris = followingUris + uris }
 
     Column(
         modifier = Modifier
@@ -148,30 +148,34 @@ fun HomeScreen(viewModel: MainViewModel) {
             enter = fadeIn() + slideInVertically()
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                DropZone(
-                    label = "followers_1.json",
-                    subtitle = if (followersUri != null) "✓ Dosya seçildi" else "Takipçiler dosyasını seçin",
+                // Followers dosyaları
+                MultiFileDropZone(
+                    label = "Takipçiler (followers_*.json)",
+                    hint = "Tüm followers dosyalarını seçin",
                     icon = Icons.Default.People,
-                    hasFile = followersUri != null,
-                    onClick = { followersLauncher.launch("application/json") }
+                    fileCount = followersUris.size,
+                    onAdd = { followersLauncher.launch("application/json") },
+                    onClear = { followersUris = emptyList() }
                 )
 
-                DropZone(
-                    label = "following.json",
-                    subtitle = if (followingUri != null) "✓ Dosya seçildi" else "Takip edilenler dosyasını seçin",
+                // Following dosyaları
+                MultiFileDropZone(
+                    label = "Takip Edilenler (following_*.json)",
+                    hint = "Tüm following dosyalarını seçin",
                     icon = Icons.Default.PersonAdd,
-                    hasFile = followingUri != null,
-                    onClick = { followingLauncher.launch("application/json") }
+                    fileCount = followingUris.size,
+                    onAdd = { followingLauncher.launch("application/json") },
+                    onClear = { followingUris = emptyList() }
                 )
 
-                if (followersUri != null && followingUri != null) {
+                if (followersUris.isNotEmpty() && followingUris.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Button(
                         onClick = {
                             viewModel.processJsonFiles(
                                 context,
-                                followersUri!!,
-                                followingUri!!
+                                followersUris,
+                                followingUris
                             )
                         },
                         modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -224,6 +228,93 @@ private fun ModeTab(
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                 color = contentColor
             )
+        }
+    }
+}
+
+@Composable
+private fun MultiFileDropZone(
+    label: String,
+    hint: String,
+    icon: ImageVector,
+    fileCount: Int,
+    onAdd: () -> Unit,
+    onClear: () -> Unit
+) {
+    val hasFiles = fileCount > 0
+    val borderColor = if (hasFiles) MaterialTheme.colorScheme.primary
+    else MaterialTheme.colorScheme.outline
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(
+                width = 1.5.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(16.dp)
+            )
+            .background(
+                if (hasFiles) MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            )
+            .padding(16.dp)
+    ) {
+        Column {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = if (hasFiles) Icons.Default.CheckCircle else icon,
+                    contentDescription = null,
+                    tint = if (hasFiles) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(32.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = label,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (hasFiles) "$fileCount dosya seçildi" else hint,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (hasFiles) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = onAdd,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (hasFiles) "Daha Ekle" else "Dosya Seç")
+                }
+                if (hasFiles) {
+                    OutlinedButton(
+                        onClick = onClear,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Temizle")
+                    }
+                }
+            }
         }
     }
 }

@@ -45,17 +45,27 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    fun processJsonFiles(context: Context, followersUri: Uri, followingUri: Uri) {
+    fun processJsonFiles(context: Context, followersUris: List<Uri>, followingUris: List<Uri>) {
         viewModelScope.launch {
             _analysisState.value = AnalysisState.Loading
             try {
                 val result = withContext(Dispatchers.IO) {
-                    val followersJson = context.contentResolver.openInputStream(followersUri)
-                        ?.bufferedReader()?.readText() ?: throw ParseException("Followers dosyası okunamadı")
-                    val followingJson = context.contentResolver.openInputStream(followingUri)
-                        ?.bufferedReader()?.readText() ?: throw ParseException("Following dosyası okunamadı")
-                    val followers = InstagramDataParser.parseFollowers(followersJson)
-                    val following = InstagramDataParser.parseFollowing(followingJson)
+                    // Birden fazla followers dosyasını birleştir
+                    val followers = followersUris.flatMap { uri ->
+                        val json = context.contentResolver.openInputStream(uri)
+                            ?.bufferedReader()?.readText()
+                            ?: throw ParseException("Followers dosyası okunamadı: $uri")
+                        InstagramDataParser.parseFollowers(json)
+                    }.distinctBy { it.username }
+
+                    // Birden fazla following dosyasını birleştir
+                    val following = followingUris.flatMap { uri ->
+                        val json = context.contentResolver.openInputStream(uri)
+                            ?.bufferedReader()?.readText()
+                            ?: throw ParseException("Following dosyası okunamadı: $uri")
+                        InstagramDataParser.parseFollowing(json)
+                    }.distinctBy { it.username }
+
                     buildResult(following, followers)
                 }
                 _analysisState.value = AnalysisState.Success(result)
@@ -72,17 +82,19 @@ class MainViewModel : ViewModel() {
             ?: throw ParseException("ZIP dosyası açılamadı")
 
         val followersJsonList = mutableListOf<String>()
-        var followingJson: String? = null
+        val followingJsonList = mutableListOf<String>()
 
         ZipInputStream(inputStream.buffered()).use { zip ->
             var entry = zip.nextEntry
             while (entry != null) {
                 val fileName = entry.name.substringAfterLast("/").lowercase()
                 when {
-                    fileName == "following.json" && followingJson == null -> {
-                        followingJson = zip.readBytes().toString(Charsets.UTF_8)
+                    // following_1.json, following_2.json veya following.json
+                    (fileName == "following.json" || (fileName.startsWith("following") && fileName.endsWith(".json"))) -> {
+                        followingJsonList.add(zip.readBytes().toString(Charsets.UTF_8))
                     }
-                    fileName.startsWith("followers") && fileName.endsWith(".json") && !fileName.contains("following") -> {
+                    // followers_1.json, followers_2.json vb.
+                    fileName.startsWith("followers") && fileName.endsWith(".json") -> {
                         followersJsonList.add(zip.readBytes().toString(Charsets.UTF_8))
                     }
                 }
@@ -94,7 +106,7 @@ class MainViewModel : ViewModel() {
         if (followersJsonList.isEmpty()) throw ParseException(
             "ZIP içinde followers_1.json bulunamadı.\nLütfen Instagram'dan indirdiğiniz ZIP dosyasını yükleyin."
         )
-        if (followingJson == null) throw ParseException(
+        if (followingJsonList.isEmpty()) throw ParseException(
             "ZIP içinde following.json bulunamadı.\nLütfen Instagram'dan indirdiğiniz ZIP dosyasını yükleyin."
         )
 
@@ -102,7 +114,10 @@ class MainViewModel : ViewModel() {
             InstagramDataParser.parseFollowers(it)
         }.distinctBy { it.username }
 
-        val following = InstagramDataParser.parseFollowing(followingJson!!)
+        val following = followingJsonList.flatMap {
+            InstagramDataParser.parseFollowing(it)
+        }.distinctBy { it.username }
+
         return buildResult(following, followers)
     }
 
